@@ -1,2 +1,14 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts and CI files must keep LF line endings (the iOS build runs on macOS).
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.plist text eol=lf
+*.pbxproj text eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.ipa binary

@@ -1,0 +1,115 @@
+# Builds an UNSIGNED iOS .ipa on a GitHub-hosted Mac - no Mac, Apple
+# Developer Program membership or signing certificate needed. Install the
+# result with SideStore / AltStore, which re-sign it with your free Apple ID.
+#
+# Triggers: every push to main, version tags (v1.2.3) and manual runs
+# (Actions tab -> "Build iOS (unsigned IPA)" -> Run workflow).
+#
+# Output:
+#   * Workflow artifact "PulseBoard-<version>-<build>-unsigned.ipa" (30 days)
+#   * For tags v*: a GitHub Release with the .ipa attached (easiest to
+#     download directly on an iPhone).
+
+name: Build iOS (unsigned IPA)
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # only used to attach the IPA to a Release on tag builds
+
+concurrency:
+  group: build-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in sync with test.yml.
+  FLUTTER_VERSION: '3.47.5'
+
+jobs:
+  test:
+    name: Tests
+    uses: ./.github/workflows/test.yml
+
+  build-ios:
+    name: Build unsigned IPA
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Show toolchain versions
+        run: |
+          flutter --version
+          xcodebuild -version
+          sw_vers
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # --no-codesign produces build/ios/iphoneos/Runner.app without any
+      # signing identity. The build number increases with every workflow run
+      # so iOS treats each install as an update.
+      - name: Build iOS app (no code signing)
+        run: flutter build ios --release --no-codesign --build-number=${{ github.run_number }}
+
+      # Flutter only produces Runner.app; an .ipa is simply a zip archive with
+      # the app inside a top-level "Payload" folder. -y preserves the symlinks
+      # inside embedded frameworks.
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP="build/ios/iphoneos/Runner.app"
+          if [ ! -d "$APP" ]; then echo "::error::$APP was not produced"; exit 1; fi
+          if [ ! -f "$APP/Runner" ]; then echo "::error::App executable missing in $APP"; exit 1; fi
+          if [ ! -d "$APP/Frameworks/Flutter.framework" ]; then echo "::error::Flutter.framework missing"; exit 1; fi
+
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Info.plist")
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP/Info.plist")
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP/Info.plist")
+          NAME="PulseBoard-${VERSION}-${BUILD}-unsigned.ipa"
+
+          rm -rf dist
+          mkdir -p dist/Payload
+          cp -R "$APP" dist/Payload/
+          (cd dist && /usr/bin/zip -qry "$NAME" Payload)
+          rm -rf dist/Payload
+
+          echo "Bundle id: $BUNDLE_ID  version: $VERSION ($BUILD)"
+          unzip -l "dist/$NAME" | head -n 25
+          ls -lh dist
+          echo "IPA_NAME=$NAME" >> "$GITHUB_ENV"
+
+          {
+            echo "### Unsigned IPA ready"
+            echo ""
+            echo "* File: \`$NAME\`"
+            echo "* Version: $VERSION ($BUILD), bundle id \`$BUNDLE_ID\`"
+            echo "* Install with SideStore/AltStore - see README \"Install on iPhone\"."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.IPA_NAME }}
+          path: dist/${{ env.IPA_NAME }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0 # an .ipa is already a zip
+
+      - name: Attach IPA to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/${{ env.IPA_NAME }}
+          generate_release_notes: true

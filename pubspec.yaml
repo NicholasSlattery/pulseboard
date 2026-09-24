@@ -1,0 +1,44 @@
+name: pulseboard
+description: "Local-first dashboard for monitoring many athletes' Bluetooth LE heart-rate chest straps at once."
+publish_to: 'none'
+
+# Bump the build number (+N) for every IPA you plan to install so iOS treats it
+# as an update. The display name lives in lib/app/app_info.dart and
+# ios/Runner/Info.plist (CFBundleDisplayName).
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Bluetooth LE (BSD-3-Clause). iOS, Android, macOS, Windows, Linux, Web.
+  universal_ble: ^2.3.0
+
+  # State management (no code generation required).
+  flutter_riverpod: ^3.4.3
+
+  # Local SQLite database. The FFI factory is used on every platform so iOS,
+  # Windows and unit tests all run the exact same database code path.
+  sqflite_common: ^2.5.13
+  sqflite_common_ffi: ^2.4.3
+
+  path: ^1.9.1
+  path_provider: ^2.1.6
+  share_plus: ^13.3.0
+  url_launcher: ^6.3.2
+  wakelock_plus: ^1.8.0
+  uuid: ^4.6.0
+  logging: ^1.3.0
+  clock: ^1.1.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  fake_async: ^1.3.3
+
+flutter:
+  uses-material-design: true

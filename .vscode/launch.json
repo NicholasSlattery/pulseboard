@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "PulseBoard - Windows (simulated straps)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "windows",
+      "args": ["--dart-define=PULSEBOARD_SIMULATOR=true"]
+    },
+    {
+      "name": "PulseBoard - Windows (real Bluetooth)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "windows"
+    }
+  ]
+}
