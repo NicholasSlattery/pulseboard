@@ -18,6 +18,7 @@ import '../../widgets/common.dart';
 import '../sensors/sensor_actions_sheet.dart';
 import '../sessions/session_summary_screen.dart';
 import 'athlete_card.dart';
+import 'speedcoach_banner.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -39,6 +40,7 @@ class DashboardScreen extends ConsumerWidget {
           if (simulated) const SimulatedDataBanner(),
           const BluetoothStatusBanner(),
           if (session != null) _RecordingBar(startedAt: session.startedAt),
+          const SpeedCoachBanner(),
           Expanded(
             child: entries.isEmpty
                 ? EmptyState(

@@ -38,16 +38,17 @@ straps. Replace them with photos from a real practice when you have them.*
 1. [How it works](#how-it-works)
 2. [Supported sensors](#supported-sensors)
 3. [Using the app at practice](#using-the-app-at-practice)
-4. [Windows development setup](#windows-development-setup)
-5. [Running on Windows](#running-on-windows)
-6. [Building the iOS app with GitHub Actions](#building-the-ios-app-with-github-actions)
-7. [Install on iPhone with SideStore](#install-on-iphone-with-sidestore)
-8. [Bluetooth details and iOS limitations](#bluetooth-details-and-ios-limitations)
-9. [Troubleshooting](#troubleshooting)
-10. [Privacy](#privacy)
-11. [Project structure and architecture](#project-structure-and-architecture)
-12. [Renaming the app](#renaming-the-app)
-13. [License](#license)
+4. [SpeedCoach (experimental)](#speedcoach-experimental)
+5. [Windows development setup](#windows-development-setup)
+6. [Running on Windows](#running-on-windows)
+7. [Building the iOS app with GitHub Actions](#building-the-ios-app-with-github-actions)
+8. [Install on iPhone with SideStore](#install-on-iphone-with-sidestore)
+9. [Bluetooth details and iOS limitations](#bluetooth-details-and-ios-limitations)
+10. [Troubleshooting](#troubleshooting)
+11. [Privacy](#privacy)
+12. [Project structure and architecture](#project-structure-and-architecture)
+13. [Renaming the app](#renaming-the-app)
+14. [License](#license)
 
 ---
 
@@ -119,6 +120,16 @@ Default max HR estimate is `220 − age` (Tanaka and Gellish formulas are
 available in Settings). A manually entered max HR always wins.
 Default zones: Z1 50-60 %, Z2 60-70 %, Z3 70-80 %, Z4 80-90 %, Z5 90 %+
 (editable in Settings; each recorded session keeps the zones it used).
+
+## SpeedCoach (experimental)
+
+PulseBoard can also receive live data from an **NK SpeedCoach** by acting as
+NK LiNK Logbook's live-streaming receiver: Settings → **SpeedCoach receiver**
+→ Start, then on the SpeedCoach *Live Streaming → Phone Pairing → Find New*.
+Elapsed time, stroke count and a calculated stroke rate appear in a strip on
+the dashboard. NK does not publish this protocol; see
+[docs/SPEEDCOACH.md](docs/SPEEDCOACH.md) for what has been decoded and the
+caveats.
 
 ## Windows development setup
 

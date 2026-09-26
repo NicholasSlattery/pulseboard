@@ -7,6 +7,7 @@ import '../models/app_settings.dart';
 import '../models/athlete.dart';
 import '../models/known_sensor.dart';
 import '../session/session_recorder.dart';
+import '../speedcoach/peripheral_adapter.dart';
 import '../storage/app_database.dart';
 import '../storage/athlete_repository.dart';
 import '../storage/sensor_repository.dart';
@@ -24,6 +25,7 @@ class AppBootstrap {
     required this.sensors,
     this.recoveredSessions = 0,
     this.isSimulated = false,
+    this.peripheralAdapter,
   });
 
   final AppDatabase database;
@@ -35,6 +37,10 @@ class AppBootstrap {
   /// Sessions that were left open by a crash and closed on this launch.
   final int recoveredSessions;
   final bool isSimulated;
+
+  /// Overrides the Bluetooth peripheral used by the SpeedCoach receiver
+  /// (tests). Null uses universal_ble.
+  final PeripheralAdapter? peripheralAdapter;
 }
 
 final bootstrapProvider = Provider<AppBootstrap>(

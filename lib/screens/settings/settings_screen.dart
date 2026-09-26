@@ -5,6 +5,7 @@ import '../../app/app_info.dart';
 import '../../models/app_settings.dart';
 import '../../models/hr_zones.dart';
 import '../../providers/settings_provider.dart';
+import '../speedcoach/speedcoach_screen.dart';
 import 'about_screen.dart';
 import 'diagnostics_screen.dart';
 import 'zone_settings_screen.dart';
@@ -176,6 +177,15 @@ class SettingsScreen extends ConsumerWidget {
               label: (m) => m.label,
               apply: (m) => s.copyWith(keepAwake: m),
             ),
+          ),
+          const _Section('Rowing'),
+          ListTile(
+            leading: const Icon(Icons.rowing),
+            title: const Text('SpeedCoach receiver'),
+            subtitle: const Text('Experimental: live stroke data from an NK SpeedCoach'),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute<void>(builder: (_) => const SpeedCoachScreen())),
           ),
           const _Section('Advanced'),
           SwitchListTile(

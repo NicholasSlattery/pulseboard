@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:pulseboard/app/app.dart';
 import 'package:pulseboard/models/app_settings.dart';
 import 'package:pulseboard/providers/core_providers.dart';
+import 'package:pulseboard/speedcoach/peripheral_adapter.dart';
 import 'package:pulseboard/storage/app_database.dart';
 import 'package:pulseboard/storage/athlete_repository.dart';
 import 'package:pulseboard/storage/sensor_repository.dart';
@@ -25,6 +26,7 @@ Future<AppBootstrap> buildTestBootstrap(
   FakeBleAdapter adapter, {
   AppSettings settings = const AppSettings(bluetoothIntroSeen: true),
   Future<void> Function(AthleteRepository athletes, SensorRepository sensors)? seed,
+  PeripheralAdapter? peripheral,
 }) async {
   late AppBootstrap bootstrap;
   await tester.runAsync(() async {
@@ -39,6 +41,7 @@ Future<AppBootstrap> buildTestBootstrap(
       settings: settings,
       athletes: await athletes.getAll(),
       sensors: await sensors.getAll(),
+      peripheralAdapter: peripheral,
     );
   });
   return bootstrap;

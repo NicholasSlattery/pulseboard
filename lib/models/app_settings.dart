@@ -41,6 +41,8 @@ class AppSettings {
     this.showTimeInZone = true,
     this.verboseLogging = false,
     this.bluetoothIntroSeen = false,
+    this.speedCoachSerial,
+    this.speedCoachBoatName = 'PulseBoard',
   });
 
   final ZoneModel zoneModel;
@@ -64,6 +66,13 @@ class AppSettings {
   /// Whether the first-launch Bluetooth explanation has been shown.
   final bool bluetoothIntroSeen;
 
+  /// Serial of the SpeedCoach paired with the experimental receiver. When
+  /// set, the receiver advertises this so that SpeedCoach reconnects.
+  final String? speedCoachSerial;
+
+  /// Boat name the SpeedCoach reads from the receiver.
+  final String speedCoachBoatName;
+
   static const List<int> staleChoicesSeconds = [3, 5, 8, 10, 15];
   static const List<int> lostChoicesSeconds = [10, 15, 20, 30, 60];
 
@@ -79,6 +88,8 @@ class AppSettings {
     bool? showTimeInZone,
     bool? verboseLogging,
     bool? bluetoothIntroSeen,
+    String? Function()? speedCoachSerial,
+    String? speedCoachBoatName,
   }) {
     return AppSettings(
       zoneModel: zoneModel ?? this.zoneModel,
@@ -92,6 +103,8 @@ class AppSettings {
       showTimeInZone: showTimeInZone ?? this.showTimeInZone,
       verboseLogging: verboseLogging ?? this.verboseLogging,
       bluetoothIntroSeen: bluetoothIntroSeen ?? this.bluetoothIntroSeen,
+      speedCoachSerial: speedCoachSerial != null ? speedCoachSerial() : this.speedCoachSerial,
+      speedCoachBoatName: speedCoachBoatName ?? this.speedCoachBoatName,
     );
   }
 
@@ -111,6 +124,8 @@ class AppSettings {
     'showTimeInZone': showTimeInZone,
     'verboseLogging': verboseLogging,
     'bluetoothIntroSeen': bluetoothIntroSeen,
+    'speedCoachSerial': speedCoachSerial,
+    'speedCoachBoatName': speedCoachBoatName,
   };
 
   /// Tolerant decoding: unknown or invalid values fall back to defaults so a
@@ -157,6 +172,15 @@ class AppSettings {
       bluetoothIntroSeen: json['bluetoothIntroSeen'] is bool
           ? json['bluetoothIntroSeen']! as bool
           : d.bluetoothIntroSeen,
+      speedCoachSerial:
+          json['speedCoachSerial'] is String && (json['speedCoachSerial']! as String).isNotEmpty
+          ? json['speedCoachSerial']! as String
+          : null,
+      speedCoachBoatName:
+          json['speedCoachBoatName'] is String &&
+              (json['speedCoachBoatName']! as String).trim().isNotEmpty
+          ? json['speedCoachBoatName']! as String
+          : d.speedCoachBoatName,
     );
   }
 
@@ -173,7 +197,9 @@ class AppSettings {
       other.themeMode == themeMode &&
       other.showTimeInZone == showTimeInZone &&
       other.verboseLogging == verboseLogging &&
-      other.bluetoothIntroSeen == bluetoothIntroSeen;
+      other.bluetoothIntroSeen == bluetoothIntroSeen &&
+      other.speedCoachSerial == speedCoachSerial &&
+      other.speedCoachBoatName == speedCoachBoatName;
 
   @override
   int get hashCode => Object.hash(
@@ -188,5 +214,7 @@ class AppSettings {
     showTimeInZone,
     verboseLogging,
     bluetoothIntroSeen,
+    speedCoachSerial,
+    speedCoachBoatName,
   );
 }

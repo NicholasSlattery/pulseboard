@@ -9,6 +9,7 @@ import '../models/sensor_state.dart';
 import '../utils/app_logger.dart';
 import 'core_providers.dart';
 import 'sensors_provider.dart';
+import 'speedcoach_provider.dart';
 import 'session_provider.dart';
 import 'settings_provider.dart';
 
@@ -86,6 +87,21 @@ final appEffectsProvider = Provider<void>((ref) {
       );
     }
   });
+
+  // SpeedCoach receiver: remember the unit that paired, keep boat name current.
+  final speedCoach = ref.read(speedCoachReceiverProvider);
+  final serialSub = speedCoach.serialReported.listen((serial) {
+    if (ref.read(settingsProvider).speedCoachSerial != serial) {
+      unawaited(
+        ref.read(settingsProvider.notifier).edit((s) => s.copyWith(speedCoachSerial: () => serial)),
+      );
+    }
+  });
+  ref.onDispose(serialSub.cancel);
+  ref.listen(
+    settingsProvider.select((s) => s.speedCoachBoatName),
+    (_, name) => speedCoach.updateBoatName(name),
+  );
 
   // Screen wakelock.
   void applyWakelock() {
