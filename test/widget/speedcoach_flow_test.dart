@@ -13,11 +13,7 @@ List<int> statusPacket(int ms) => [
 ];
 
 List<int> strokePacket(int count) => [
-  0x88,
-  0xFF,
-  ...List.filled(12, 0),
-  count,
-  ...List.filled(5, 0),
+  60, 0xFF, 250 & 0xFF, 250 >> 8, 0, 0, 120, 0, 0, 0, 200, 0, 0, 0, count, 0, 0, 0, 0, 0, //
 ];
 
 void main() {
@@ -65,7 +61,8 @@ void main() {
       const Offset(0, -200),
     );
     await tester.pump();
-    expect(find.text('30'), findsOneWidget); // calculated rate
+    expect(find.text('30'), findsOneWidget); // SpeedCoach rate
+    expect(find.text('3:20'), findsOneWidget); // split for 250 cm/s
     expect(find.text('45'), findsOneWidget); // stroke count
     final container = ProviderScope.containerOf(tester.element(find.byType(Scaffold).first));
     expect(container.read(settingsProvider).speedCoachSerial, '2226780');
@@ -79,7 +76,8 @@ void main() {
     peripheral.write('0103', statusPacket(102000));
     await pumpFor(tester, const Duration(milliseconds: 400));
     expect(find.text('SPEEDCOACH'), findsOneWidget);
-    expect(find.textContaining('46 strokes'), findsOneWidget);
+    expect(find.textContaining('30 spm'), findsOneWidget);
+    expect(find.textContaining('3:20 /500m'), findsOneWidget);
     await screenshot(tester, '13_dashboard_speedcoach_strip');
 
     // Next start advertises the remembered serial so that unit reconnects.

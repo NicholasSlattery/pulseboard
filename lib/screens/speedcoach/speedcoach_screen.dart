@@ -104,9 +104,9 @@ class _SpeedCoachScreenState extends ConsumerState<SpeedCoachScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Experimental: NK does not publish this protocol. Elapsed time and stroke '
-                    'count are decoded; stroke rate is calculated from stroke timing; split and '
-                    'distance are not decoded yet.',
+                    'Experimental: NK does not publish this protocol. Rate, split, distance, '
+                    'time and stroke count are decoded from the SpeedCoach and were checked '
+                    'against its display.',
                     style: theme.textTheme.bodySmall,
                   ),
                 ],
@@ -232,7 +232,7 @@ class _LiveValues extends StatelessWidget {
     Widget tile(String label, String value, {String? note}) => Expanded(
       child: Card(
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
           child: Column(
             children: [
               Text(label, style: theme.textTheme.labelMedium?.copyWith(letterSpacing: 1)),
@@ -240,35 +240,54 @@ class _LiveValues extends StatelessWidget {
               FittedBox(
                 child: Text(
                   value,
-                  style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w900),
+                  style: const TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.w900,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
                 ),
               ),
-              if (note != null) Text(note, style: theme.textTheme.bodySmall),
+              Text(note ?? ' ', style: theme.textTheme.bodySmall),
             ],
           ),
         ),
       ),
     );
     final live = state.isStreaming;
-    final rate = live && state.strokeRate != null ? state.strokeRate!.round().toString() : '--';
-    final elapsed = state.elapsed;
-    final elapsedText = !live || elapsed == null
-        ? '--'
-        : '${Fmt.duration(elapsed)}.${(elapsed.inMilliseconds % 1000 ~/ 100)}';
+    String orDash(Object? v, String Function() format) => live && v != null ? format() : '--';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            tile('RATE', rate, note: state.isIdle && live ? 'paused' : 'calculated'),
-            tile('STROKES', live && state.strokeCount != null ? '${state.strokeCount}' : '--'),
-            tile('TIME', elapsedText),
+            tile(
+              'RATE',
+              orDash(state.strokeRate, () => SpeedCoachFormat.rate(state.strokeRate!)),
+              note: 'spm',
+            ),
+            tile('SPLIT', orDash(state.split, () => Fmt.duration(state.split!)), note: '/500m'),
+          ],
+        ),
+        Row(
+          children: [
+            tile('TIME', orDash(state.elapsed, () => SpeedCoachFormat.elapsed(state.elapsed!))),
+            tile(
+              'DISTANCE',
+              orDash(state.distanceMeters, () => '${state.distanceMeters!.round()}'),
+              note: 'm',
+            ),
+            tile('STROKES', orDash(state.strokeCount, () => '${state.strokeCount}')),
           ],
         ),
         const SizedBox(height: 8),
         Text(
           [
             if (state.serial != null) 'SpeedCoach ${state.serial}',
+            if (live && state.averageSplit != null)
+              'avg split ${Fmt.duration(state.averageSplit!)}',
+            if (live && state.distancePerStrokeMeters != null)
+              '${state.distancePerStrokeMeters!.toStringAsFixed(1)} m/stroke',
+            if (live && !state.pieceRunning) 'no piece running',
             '${state.packetsReceived} packets',
             if (state.lastPacketAt != null)
               'last ${clock.now().difference(state.lastPacketAt!).inSeconds}s ago',
@@ -278,4 +297,14 @@ class _LiveValues extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Formats SpeedCoach values the way the SpeedCoach shows them.
+abstract final class SpeedCoachFormat {
+  /// 28.5 -> "28.5", 28.0 -> "28".
+  static String rate(double spm) =>
+      spm == spm.roundToDouble() ? spm.toStringAsFixed(0) : spm.toStringAsFixed(1);
+
+  /// 0:37.2 with tenths.
+  static String elapsed(Duration d) => '${Fmt.duration(d)}.${d.inMilliseconds % 1000 ~/ 100}';
 }

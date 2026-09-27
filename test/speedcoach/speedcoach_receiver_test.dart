@@ -11,20 +11,33 @@ import '../support/fake_peripheral.dart';
 List<int> hex(String s) =>
     s.split(' ').where((p) => p.isNotEmpty).map((p) => int.parse(p, radix: 16)).toList();
 
-List<int> statusPacket(int ms) => [
-  ...hex('ee aa f5 17 bb da 1d cb 00 00 00 00 00 00 00 00'),
-  ms & 0xFF,
-  (ms >> 8) & 0xFF,
-  (ms >> 16) & 0xFF,
-  (ms >> 24) & 0xFF,
+List<int> statusPacket(int ms, {int cm = 0}) => [
+  ...hex('ee aa f5 17 bb da 1d cb'),
+  cm & 0xFF, (cm >> 8) & 0xFF, (cm >> 16) & 0xFF, (cm >> 24) & 0xFF, 0, 0, 0, 0, //
+  ms & 0xFF, (ms >> 8) & 0xFF, (ms >> 16) & 0xFF, (ms >> 24) & 0xFF,
 ];
 
-List<int> strokePacket(int count) => [
-  0x88,
+List<int> strokePacket(int count, {int rateTimesTwo = 60, int speed = 250}) => [
+  rateTimesTwo,
   0xFF,
-  ...List.filled(12, 0),
+  speed & 0xFF,
+  speed >> 8,
+  0,
+  0,
+  120,
+  0,
+  0,
+  0,
+  200,
+  0,
+  0,
+  0,
   count,
-  ...List.filled(5, 0),
+  0,
+  0,
+  0,
+  0,
+  0, //
 ];
 
 void main() {
@@ -62,7 +75,7 @@ void main() {
     });
   });
 
-  test('decodes serial, elapsed time, strokes and calculated rate', () {
+  test('decodes serial, elapsed time, distance, strokes, rate and split', () {
     fakeAsync((async) {
       final p = FakePeripheral();
       final r = SpeedCoachReceiver(adapter: p);
@@ -77,8 +90,9 @@ void main() {
       expect(serials, ['2226780']);
       expect(r.state.status, SpeedCoachReceiverStatus.streaming);
 
-      p.write('0103', statusPacket(75054));
+      p.write('0103', statusPacket(75054, cm: 12345));
       expect(r.state.elapsed, const Duration(milliseconds: 75054));
+      expect(r.state.distanceMeters, 123.45);
 
       for (var i = 0; i < 5; i++) {
         p.write('0203', strokePacket(40 + i));
@@ -86,14 +100,17 @@ void main() {
         async.elapse(const Duration(seconds: 2));
       }
       expect(r.state.strokeCount, 44);
-      expect(r.state.strokeRate, closeTo(30, 0.5));
+      expect(r.state.strokeRate, 30);
+      expect(r.state.split, const Duration(seconds: 200)); // 50000 / 250
+      expect(r.state.averageSplit, const Duration(seconds: 250));
+      expect(r.state.distancePerStrokeMeters, 1.2);
       expect(r.packetLog.length, 12);
       expect(r.packetLogCsv().split('\r\n').first, 'time_utc,characteristic,hex');
       unawaited(r.dispose());
     });
   });
 
-  test('idle marker clears the rate; silence drops back to waiting', () {
+  test('idle packet clears the split; silence drops back to waiting', () {
     fakeAsync((async) {
       final p = FakePeripheral();
       final r = SpeedCoachReceiver(adapter: p);
@@ -105,7 +122,7 @@ void main() {
       expect(r.state.strokeRate, isNotNull);
 
       p.write('0203', hex('00 ff ff ff 00 00 ff ff 00 00 00 00 00 00 02 00 00 00 00 00'));
-      expect(r.state.isIdle, isTrue);
+      expect(r.state.split, isNull);
       expect(r.state.strokeRate, isNull);
 
       async.elapse(const Duration(seconds: 6));

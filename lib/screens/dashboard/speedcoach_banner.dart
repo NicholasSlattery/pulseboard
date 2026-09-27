@@ -22,10 +22,10 @@ class SpeedCoachBanner extends ConsumerWidget {
     final live = s.isStreaming;
     final parts = live
         ? [
-            if (s.strokeRate != null && !s.isIdle) '${s.strokeRate!.round()} spm',
-            if (s.isIdle) 'paused',
+            if (s.strokeRate != null) '${SpeedCoachFormat.rate(s.strokeRate!)} spm',
+            if (s.split != null) '${Fmt.duration(s.split!)} /500m',
+            if (s.distanceMeters != null) '${s.distanceMeters!.round()} m',
             if (s.elapsed != null) Fmt.duration(s.elapsed!),
-            if (s.strokeCount != null) '${s.strokeCount} strokes',
           ]
         : ['waiting for SpeedCoach…'];
     final color = live ? AppColors.info : AppColors.warning;
@@ -47,13 +47,17 @@ class SpeedCoachBanner extends ConsumerWidget {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  parts.join('  ·  '),
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16,
-                    fontFeatures: [FontFeature.tabularFigures()],
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    parts.join('  ·  '),
+                    maxLines: 1,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
                   ),
                 ),
               ),

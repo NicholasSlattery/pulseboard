@@ -126,8 +126,8 @@ Default zones: Z1 50-60 %, Z2 60-70 %, Z3 70-80 %, Z4 80-90 %, Z5 90 %+
 PulseBoard can also receive live data from an **NK SpeedCoach** by acting as
 NK LiNK Logbook's live-streaming receiver: Settings → **SpeedCoach receiver**
 → Start, then on the SpeedCoach *Live Streaming → Phone Pairing → Find New*.
-Elapsed time, stroke count and a calculated stroke rate appear in a strip on
-the dashboard. NK does not publish this protocol; see
+Stroke rate, split, distance and elapsed time appear in a strip on the
+dashboard. NK does not publish this protocol; see
 [docs/SPEEDCOACH.md](docs/SPEEDCOACH.md) for what has been decoded and the
 caveats.
 

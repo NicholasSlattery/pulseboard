@@ -39,9 +39,14 @@ class SpeedCoachLiveState {
     this.error,
     this.serial,
     this.elapsed,
+    this.distanceMeters,
     this.strokeCount,
     this.strokeRate,
-    this.isIdle = false,
+    this.split,
+    this.averageSplit,
+    this.distancePerStrokeMeters,
+    this.pieceRunning = false,
+    this.pieceStartedAt,
     this.lastPacketAt,
     this.packetsReceived = 0,
   });
@@ -53,11 +58,20 @@ class SpeedCoachLiveState {
   /// Serial number the SpeedCoach reported when it connected.
   final String? serial;
   final Duration? elapsed;
+  final double? distanceMeters;
   final int? strokeCount;
 
-  /// Calculated from stroke timing (strokes per minute).
+  /// The SpeedCoach's own stroke rate (strokes/min, 0.5 steps).
   final double? strokeRate;
-  final bool isIdle;
+
+  /// Current and average time per 500 m. Null when stopped / no GPS.
+  final Duration? split;
+  final Duration? averageSplit;
+  final double? distancePerStrokeMeters;
+  final bool pieceRunning;
+
+  /// SpeedCoach local time when the current piece started.
+  final DateTime? pieceStartedAt;
   final DateTime? lastPacketAt;
   final int packetsReceived;
 
@@ -69,9 +83,14 @@ class SpeedCoachLiveState {
     String? Function()? error,
     String? Function()? serial,
     Duration? Function()? elapsed,
+    double? Function()? distanceMeters,
     int? Function()? strokeCount,
     double? Function()? strokeRate,
-    bool? isIdle,
+    Duration? Function()? split,
+    Duration? Function()? averageSplit,
+    double? Function()? distancePerStrokeMeters,
+    bool? pieceRunning,
+    DateTime? Function()? pieceStartedAt,
     DateTime? Function()? lastPacketAt,
     int? packetsReceived,
   }) => SpeedCoachLiveState(
@@ -80,9 +99,16 @@ class SpeedCoachLiveState {
     error: error != null ? error() : this.error,
     serial: serial != null ? serial() : this.serial,
     elapsed: elapsed != null ? elapsed() : this.elapsed,
+    distanceMeters: distanceMeters != null ? distanceMeters() : this.distanceMeters,
     strokeCount: strokeCount != null ? strokeCount() : this.strokeCount,
     strokeRate: strokeRate != null ? strokeRate() : this.strokeRate,
-    isIdle: isIdle ?? this.isIdle,
+    split: split != null ? split() : this.split,
+    averageSplit: averageSplit != null ? averageSplit() : this.averageSplit,
+    distancePerStrokeMeters: distancePerStrokeMeters != null
+        ? distancePerStrokeMeters()
+        : this.distancePerStrokeMeters,
+    pieceRunning: pieceRunning ?? this.pieceRunning,
+    pieceStartedAt: pieceStartedAt != null ? pieceStartedAt() : this.pieceStartedAt,
     lastPacketAt: lastPacketAt != null ? lastPacketAt() : this.lastPacketAt,
     packetsReceived: packetsReceived ?? this.packetsReceived,
   );
@@ -123,7 +149,6 @@ class SpeedCoachReceiver {
   final _serials = StreamController<String>.broadcast();
   final _packetLog = ListQueue<SpeedCoachPacket>();
   final Map<String, Uint8List> _values = {};
-  final StrokeRateEstimator _rate = StrokeRateEstimator();
 
   SpeedCoachLiveState _state = const SpeedCoachLiveState();
   String _boatName = 'PulseBoard';
@@ -201,7 +226,6 @@ class SpeedCoachReceiver {
       _serviceAdded = false;
     }
     _adapter.clearHandlers();
-    _rate.reset();
     _log.info('Receiver stopped');
     _set(const SpeedCoachLiveState());
   }
@@ -249,27 +273,32 @@ class SpeedCoachReceiver {
           next = next.copyWith(serial: () => serial);
           _serials.add(serial);
         }
+      case SpeedCoachUuids.pieceStartSuffix:
+        final start = SpeedCoachPieceStart.parse(value);
+        if (start != null) {
+          _log.info('Piece started ${start.startedAt}');
+          next = next.copyWith(pieceStartedAt: () => start.startedAt, pieceRunning: true);
+        }
       case SpeedCoachUuids.liveStatusSuffix:
         final status = SpeedCoachStatusPacket.parse(value);
-        if (status != null) next = next.copyWith(elapsed: () => status.elapsed);
+        if (status != null) {
+          next = next.copyWith(
+            elapsed: () => status.elapsed,
+            distanceMeters: () => status.distanceMeters,
+          );
+        }
       case SpeedCoachUuids.strokeSuffix:
         final stroke = SpeedCoachStrokePacket.parse(value);
         if (stroke != null) {
-          if (stroke.isIdle) {
-            _rate.reset();
-            next = next.copyWith(
-              isIdle: true,
-              strokeRate: () => null,
-              strokeCount: () => stroke.strokeCount,
-            );
-          } else {
-            _rate.addStroke(stroke.strokeCount, now);
-            next = next.copyWith(
-              isIdle: false,
-              strokeCount: () => stroke.strokeCount,
-              strokeRate: () => _rate.rate,
-            );
-          }
+          next = next.copyWith(
+            strokeCount: () => stroke.strokeCount,
+            strokeRate: () => stroke.strokeRate > 0 ? stroke.strokeRate : null,
+            split: () => stroke.split,
+            averageSplit: () => stroke.averageSplit,
+            distancePerStrokeMeters: () =>
+                stroke.distancePerStrokeCm == null ? null : stroke.distancePerStrokeCm! / 100,
+            pieceRunning: stroke.pieceRunning,
+          );
         }
     }
     _set(next);
@@ -295,8 +324,13 @@ class SpeedCoachReceiver {
     if (_state.status != SpeedCoachReceiverStatus.streaming || last == null) return;
     if (clock.now().difference(last) > staleAfter) {
       _log.info('SpeedCoach data stopped');
-      _rate.reset();
-      _set(_state.copyWith(status: SpeedCoachReceiverStatus.waiting, strokeRate: () => null));
+      _set(
+        _state.copyWith(
+          status: SpeedCoachReceiverStatus.waiting,
+          strokeRate: () => null,
+          split: () => null,
+        ),
+      );
     }
   }
 

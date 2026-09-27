@@ -2,6 +2,9 @@ import 'package:flutter/foundation.dart';
 
 /// NK SpeedCoach live-streaming protocol, as far as it has been decoded.
 ///
+/// Rate, split and stroke count were verified stroke-by-stroke against a
+/// video of the SpeedCoach display (9/9 strokes exact).
+///
 /// NK does not publish this protocol. Everything here was worked out from a
 /// Bluetooth capture of a SpeedCoach GPS Pro (firmware 2.25) streaming to NK
 /// LiNK Logbook - see docs/SPEEDCOACH.md. Fields not listed are unknown.
@@ -22,11 +25,14 @@ abstract final class SpeedCoachUuids {
 
   static String char(String suffix) => '3291ddee-0889-409c-b993-24ec${suffix}9970';
 
-  /// ~5 Hz status: bytes 16-19 = elapsed piece time (ms).
+  /// ~5 Hz status: position, distance, elapsed time.
   static const String liveStatusSuffix = '0103';
 
-  /// One write per stroke: byte 14 = stroke count.
+  /// One write per stroke: rate, speed, stroke count, ...
   static const String strokeSuffix = '0203';
+
+  /// Written when a piece starts: SpeedCoach local date/time.
+  static const String pieceStartSuffix = '0100';
 
   /// SpeedCoach writes its serial number (ASCII) here when it connects.
   static const String serialSuffix = '1005';
@@ -53,105 +59,154 @@ abstract final class SpeedCoachNames {
   static const String pairing = 'NK LiNKp';
 }
 
-/// Decoded live-status packet (characteristic ...0103, ~5 per second).
+/// Piece start (characteristic ...0100): sent when a piece starts, with the
+/// SpeedCoach's local date and time.
 @immutable
-class SpeedCoachStatusPacket {
-  const SpeedCoachStatusPacket({required this.elapsed, required this.raw});
+class SpeedCoachPieceStart {
+  const SpeedCoachPieceStart({required this.startedAt, required this.raw});
 
-  /// Elapsed time of the current piece. Pauses when the piece is paused.
-  final Duration elapsed;
-
-  /// Full packet. Bytes 0-7 look like the last GPS position; bytes 8-15 were
-  /// all zero indoors (probably speed/distance). Not decoded yet.
+  /// Local wall-clock time on the SpeedCoach.
+  final DateTime startedAt;
   final Uint8List raw;
 
-  static SpeedCoachStatusPacket? parse(List<int> bytes) {
-    if (bytes.length != 20) return null;
+  /// Layout: second, minute, hour, day, month, year (uint16 LE), then
+  /// unknown bytes (byte 10 was 3 in every capture).
+  static SpeedCoachPieceStart? parse(List<int> bytes) {
+    if (bytes.length < 7) return null;
     final data = Uint8List.fromList(bytes);
-    final ms = ByteData.sublistView(data).getUint32(16, Endian.little);
-    return SpeedCoachStatusPacket(
-      elapsed: Duration(milliseconds: ms),
+    final year = data[5] | (data[6] << 8);
+    if (data[0] > 59 || data[1] > 59 || data[2] > 23 || data[3] < 1 || data[3] > 31) return null;
+    if (data[4] < 1 || data[4] > 12 || year < 2000 || year > 2100) return null;
+    return SpeedCoachPieceStart(
+      startedAt: DateTime(year, data[4], data[3], data[2], data[1], data[0]),
       raw: data,
     );
   }
 }
 
-/// Decoded per-stroke packet (characteristic ...0203).
+/// Decoded live-status packet (characteristic ...0103, ~5 per second).
+///
+/// | bytes | meaning                                        |
+/// |-------|------------------------------------------------|
+/// | 0-3   | latitude, int32 LE, degrees x 1e-7             |
+/// | 4-7   | longitude, int32 LE, degrees x 1e-7            |
+/// | 8-11  | distance in the current piece, uint32 LE, cm   |
+/// | 12-15 | always zero so far                             |
+/// | 16-19 | elapsed piece time, uint32 LE, milliseconds    |
+@immutable
+class SpeedCoachStatusPacket {
+  const SpeedCoachStatusPacket({
+    required this.elapsed,
+    required this.distanceMeters,
+    required this.raw,
+    this.latitude,
+    this.longitude,
+  });
+
+  /// Elapsed time of the current piece. Pauses when the piece is paused.
+  final Duration elapsed;
+
+  /// Distance covered in the current piece (GPS).
+  final double distanceMeters;
+
+  /// Last GPS position, or null when the SpeedCoach reports none.
+  final double? latitude;
+  final double? longitude;
+  final Uint8List raw;
+
+  /// Distance and time are both zero: no piece running / piece was reset.
+  bool get isReset => distanceMeters == 0 && elapsed == Duration.zero;
+
+  static SpeedCoachStatusPacket? parse(List<int> bytes) {
+    if (bytes.length != 20) return null;
+    final data = Uint8List.fromList(bytes);
+    final view = ByteData.sublistView(data);
+    final lat = view.getInt32(0, Endian.little);
+    final lon = view.getInt32(4, Endian.little);
+    final hasPosition = lat != 0 || lon != 0;
+    return SpeedCoachStatusPacket(
+      elapsed: Duration(milliseconds: view.getUint32(16, Endian.little)),
+      distanceMeters: view.getUint32(8, Endian.little) / 100,
+      latitude: hasPosition ? lat / 1e7 : null,
+      longitude: hasPosition ? lon / 1e7 : null,
+      raw: data,
+    );
+  }
+}
+
+/// Decoded per-stroke packet (characteristic ...0203), one per stroke.
+///
+/// | bytes | meaning                                                  |
+/// |-------|----------------------------------------------------------|
+/// | 0     | stroke rate x 2 (so half-stroke resolution: 57 = 28.5)   |
+/// | 1     | 0xFF in every capture (probably heart rate: none paired) |
+/// | 2-3   | speed, uint16 LE, cm/s (FFFF = no speed)                 |
+/// | 4-5   | FFFF when no piece is running, else 0                    |
+/// | 6-7   | distance per stroke, uint16 LE, cm                       |
+/// | 10-11 | average speed for the piece, uint16 LE, cm/s             |
+/// | 14    | stroke count in the piece (uint8)                        |
+///
+/// Rate, split (from speed) and stroke count were verified stroke-by-stroke
+/// against the SpeedCoach display.
 @immutable
 class SpeedCoachStrokePacket {
   const SpeedCoachStrokePacket({
     required this.strokeCount,
-    required this.isIdle,
+    required this.strokeRate,
+    required this.pieceRunning,
     required this.raw,
+    this.speedCmPerSecond,
+    this.distancePerStrokeCm,
+    this.averageSpeedCmPerSecond,
   });
 
   /// Strokes in the current piece (single byte on the wire, so it wraps at
-  /// 256; callers should treat it as a counter, not an absolute total).
+  /// 256; treat it as a counter, not an absolute total).
   final int strokeCount;
 
-  /// The SpeedCoach sends a marker with bytes 2-3 and 6-7 = FF FF when the
-  /// rower has stopped.
-  final bool isIdle;
+  /// Strokes per minute, in steps of 0.5 like the SpeedCoach display.
+  final double strokeRate;
+
+  /// False when the SpeedCoach is not in a piece (bytes 4-5 = FF FF).
+  final bool pieceRunning;
+
+  /// Boat speed in cm/s, or null when the SpeedCoach has none.
+  final int? speedCmPerSecond;
+  final int? distancePerStrokeCm;
+  final int? averageSpeedCmPerSecond;
   final Uint8List raw;
+
+  /// No speed: the SpeedCoach sends FF FF when the boat is stopped / no GPS.
+  bool get isIdle => speedCmPerSecond == null;
+
+  /// Time per 500 m at the current speed.
+  Duration? get split => splitFor(speedCmPerSecond);
+
+  /// Average time per 500 m for the piece.
+  Duration? get averageSplit => splitFor(averageSpeedCmPerSecond);
+
+  /// 500 m at [cmPerSecond]: 50 000 / speed seconds.
+  static Duration? splitFor(int? cmPerSecond) {
+    if (cmPerSecond == null || cmPerSecond <= 0) return null;
+    return Duration(milliseconds: (50000000 / cmPerSecond).round());
+  }
 
   static SpeedCoachStrokePacket? parse(List<int> bytes) {
     if (bytes.length != 20) return null;
     final data = Uint8List.fromList(bytes);
-    final idle = data[2] == 0xFF && data[3] == 0xFF && data[6] == 0xFF && data[7] == 0xFF;
-    return SpeedCoachStrokePacket(strokeCount: data[14], isIdle: idle, raw: data);
-  }
-}
-
-/// Estimates stroke rate from the arrival times of per-stroke packets.
-///
-/// The decoded protocol does not (yet) contain the SpeedCoach's own rate
-/// field, so rate is calculated: 60 / median of the last few stroke
-/// intervals. Bluetooth delivery jitter is tens of milliseconds, i.e. about
-/// 1-2 % at rowing rates.
-class StrokeRateEstimator {
-  StrokeRateEstimator({this.window = 4, this.maxGap = const Duration(seconds: 10)});
-
-  final int window;
-
-  /// A pause longer than this starts a fresh estimate.
-  final Duration maxGap;
-
-  final List<Duration> _intervals = [];
-  DateTime? _lastStrokeAt;
-  int? _lastCount;
-
-  /// Current estimate in strokes per minute, or null if unknown.
-  double? get rate {
-    if (_intervals.isEmpty) return null;
-    final sorted = [..._intervals]..sort();
-    final mid = sorted.length ~/ 2;
-    final medianMs = sorted.length.isOdd
-        ? sorted[mid].inMilliseconds.toDouble()
-        : (sorted[mid - 1].inMilliseconds + sorted[mid].inMilliseconds) / 2;
-    if (medianMs <= 0) return null;
-    return 60000 / medianMs;
-  }
-
-  void addStroke(int count, DateTime at) {
-    final lastAt = _lastStrokeAt;
-    final lastCount = _lastCount;
-    _lastStrokeAt = at;
-    _lastCount = count;
-    if (lastAt == null || lastCount == null) return;
-    final gap = at.difference(lastAt);
-    final advanced = (count - lastCount) & 0xFF;
-    if (gap > maxGap || gap <= Duration.zero || advanced != 1) {
-      // Pause, reset or missed strokes: start over.
-      _intervals.clear();
-      return;
+    int? u16(int i) {
+      final v = data[i] | (data[i + 1] << 8);
+      return v == 0xFFFF ? null : v;
     }
-    _intervals.add(gap);
-    if (_intervals.length > window) _intervals.removeAt(0);
-  }
 
-  void reset() {
-    _intervals.clear();
-    _lastStrokeAt = null;
-    _lastCount = null;
+    return SpeedCoachStrokePacket(
+      strokeCount: data[14],
+      strokeRate: data[0] / 2,
+      pieceRunning: !(data[4] == 0xFF && data[5] == 0xFF),
+      speedCmPerSecond: u16(2),
+      distancePerStrokeCm: u16(6),
+      averageSpeedCmPerSecond: u16(10),
+      raw: data,
+    );
   }
 }
