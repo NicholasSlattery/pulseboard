@@ -97,10 +97,25 @@ Future<void> loadRealFonts() async {
   if (_fontsLoaded) return;
   final dir = _materialFontsDir();
   if (dir == null) return;
-  Future<void> load(String family, List<String> files) async {
+  // Match names case-insensitively, anywhere under bin/cache (the layout of
+  // the font artifacts differs between platforms and Flutter versions).
+  final cache = p.dirname(p.dirname(dir));
+  final files = <String, File>{
+    for (final f in Directory(cache).listSync(recursive: true).whereType<File>())
+      if (p.extension(f.path).toLowerCase() == '.ttf' ||
+          p.extension(f.path).toLowerCase() == '.otf')
+        p.basename(f.path).toLowerCase(): f,
+  };
+  if (!files.containsKey('roboto-regular.ttf')) {
+    // ignore: avoid_print
+    print('Roboto not found under $cache; widget tests use the test font.');
+  }
+  Future<void> load(String family, List<String> names) async {
     final loader = FontLoader(family);
-    for (final f in files) {
-      final bytes = File(p.join(dir, f)).readAsBytesSync();
+    for (final name in names) {
+      final file = files[name];
+      if (file == null) continue;
+      final bytes = file.readAsBytesSync();
       loader.addFont(Future.value(ByteData.view(bytes.buffer)));
     }
     await loader.load();
