@@ -5,6 +5,7 @@ import '../../app/app_info.dart';
 import '../../models/app_settings.dart';
 import '../../models/hr_zones.dart';
 import '../../providers/settings_provider.dart';
+import '../live/targets_dialog.dart';
 import '../speedcoach/speedcoach_screen.dart';
 import 'about_screen.dart';
 import 'diagnostics_screen.dart';
@@ -130,29 +131,46 @@ class SettingsScreen extends ConsumerWidget {
               apply: (d) => s.copyWith(signalLostAfter: d),
             ),
           ),
-          const _Section('Display'),
+          const _Section('Live screen'),
           ListTile(
-            leading: const Icon(Icons.grid_view),
-            title: const Text('Dashboard layout'),
-            subtitle: Text(s.density.label),
-            onTap: () => pickEnum<DashboardDensity>(
-              title: 'Dashboard layout',
-              values: DashboardDensity.values,
-              current: s.density,
-              label: (d) => switch (d) {
-                DashboardDensity.auto => 'Auto-fit (all athletes on one screen)',
-                DashboardDensity.large => 'Large cards',
-                DashboardDensity.compact => 'Compact cards',
-              },
-              apply: (d) => s.copyWith(density: d),
+            leading: const Icon(Icons.wb_sunny_outlined),
+            title: const Text('Live screen colours'),
+            subtitle: Text(
+              s.liveTheme == LiveTheme.water
+                  ? 'On the water: dark, high contrast'
+                  : 'Daylight: white, for direct sun',
+            ),
+            onTap: () => pickEnum<LiveTheme>(
+              title: 'Live screen colours',
+              values: LiveTheme.values,
+              current: s.liveTheme,
+              label: (t) => t.label,
+              apply: (t) => s.copyWith(liveTheme: t),
             ),
           ),
-          SwitchListTile(
-            secondary: const Icon(Icons.timelapse),
-            title: const Text('Show time in current zone'),
-            value: s.showTimeInZone,
-            onChanged: (v) => controller.save(s.copyWith(showTimeInZone: v)),
+          ListTile(
+            leading: const Icon(Icons.view_quilt_outlined),
+            title: const Text('Open live screen in'),
+            subtitle: Text(s.liveViewMode.label),
+            onTap: () => pickEnum<LiveViewMode>(
+              title: 'Open live screen in',
+              values: LiveViewMode.values,
+              current: s.liveViewMode,
+              label: (m) => switch (m) {
+                LiveViewMode.crew => 'Crew (SpeedCoach + every rower)',
+                LiveViewMode.boat => 'Boat data (every SpeedCoach value)',
+                LiveViewMode.simple => 'Simple (split, rate, distance, time)',
+              },
+              apply: (m) => s.copyWith(liveViewMode: m),
+            ),
           ),
+          ListTile(
+            leading: const Icon(Icons.flag_outlined),
+            title: const Text('Targets'),
+            subtitle: Text(targetsSummary(s)),
+            onTap: () => showTargetsDialog(context, ref),
+          ),
+          const _Section('Display'),
           ListTile(
             leading: const Icon(Icons.brightness_6),
             title: const Text('Theme'),
@@ -181,8 +199,8 @@ class SettingsScreen extends ConsumerWidget {
           const _Section('Rowing'),
           ListTile(
             leading: const Icon(Icons.rowing),
-            title: const Text('SpeedCoach receiver'),
-            subtitle: const Text('Experimental: live stroke data from an NK SpeedCoach'),
+            title: const Text('SpeedCoach'),
+            subtitle: const Text('Pairing, boat name and raw packets (experimental)'),
             onTap: () => Navigator.of(
               context,
             ).push(MaterialPageRoute<void>(builder: (_) => const SpeedCoachScreen())),

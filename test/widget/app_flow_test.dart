@@ -1,10 +1,52 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pulseboard/models/app_settings.dart';
-import 'package:pulseboard/screens/dashboard/athlete_card.dart';
+import 'package:pulseboard/models/athlete.dart';
+import 'package:pulseboard/models/lineup.dart';
 
 import '../support/fake_ble_adapter.dart';
 import '../support/test_app.dart';
+
+/// Eight rowers named stroke to bow, seated 8..1.
+const crewNames = [
+  'Marcus T.',
+  'Owen L.',
+  'Diego R.',
+  'Sam K.',
+  'Jonah W.',
+  'Chris P.',
+  'Eli B.',
+  'Ryan D.',
+];
+
+LineupBook eightLineup(List<Athlete> athletes) {
+  final byName = {for (final a in athletes) a.name: a.id};
+  final seats = [for (var seat = 1; seat <= 8; seat++) byName[crewNames[8 - seat]]];
+  return LineupBook(
+    lineups: [Lineup(id: 'A', name: 'Lineup A', boatClass: BoatClass.eight, seats: seats)],
+    activeId: 'A',
+  );
+}
+
+Future<void> holdToStop(WidgetTester tester) async {
+  final gesture = await tester.startGesture(tester.getCenter(find.text('Hold to stop')));
+  await pumpFor(tester, const Duration(milliseconds: 1200));
+  await gesture.up();
+  for (var i = 0; i < 10; i++) {
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+  await pumpFor(tester, const Duration(seconds: 1));
+}
+
+Future<void> startSession(WidgetTester tester) async {
+  await tester.tap(find.text('Start session'));
+  for (var i = 0; i < 6; i++) {
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+  await pumpFor(tester, const Duration(milliseconds: 300));
+}
 
 void main() {
   setUpAll(loadRealFonts);
@@ -16,7 +58,7 @@ void main() {
   }
 
   testWidgets('first launch explains Bluetooth before initialising it', (tester) async {
-    await setSize(tester, const Size(430, 932));
+    await setSize(tester, const Size(390, 844));
     final adapter = FakeBleAdapter();
     final bootstrap = await buildTestBootstrap(tester, adapter, settings: const AppSettings());
     await tester.pumpWidget(testApp(bootstrap));
@@ -29,77 +71,134 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await pumpFor(tester, const Duration(milliseconds: 500));
 
-    expect(find.text('No athletes on the board yet'), findsOneWidget);
-    await screenshot(tester, '02_dashboard_empty_phone');
+    expect(find.text('No lineup yet'), findsOneWidget);
+    expect(find.text('Start session'), findsOneWidget);
+    await screenshot(tester, '02_live_ready_empty_phone');
     await disposeApp(tester, bootstrap);
   });
 
-  testWidgets('dashboard shows live HR per athlete and never presents stale data as live', (
+  testWidgets('crew screen shows every seat in order and never presents stale data as live', (
     tester,
   ) async {
-    await setSize(tester, const Size(1180, 820)); // iPad landscape
+    final semantics = tester.ensureSemantics();
+    await setSize(tester, const Size(390, 844));
     final adapter = FakeBleAdapter();
     final bootstrap = await buildTestBootstrap(
       tester,
       adapter,
       seed: (athletes, sensors) async {
-        final names = ['Nicholas', 'Ava', 'Ben', 'Chloe', 'Dan', 'Eve', 'Finn', 'Grace'];
-        for (var i = 0; i < names.length; i++) {
-          final a = await athletes.create(name: names[i], maxHrOverride: 190 + i);
+        for (var i = 0; i < crewNames.length; i++) {
+          final a = await athletes.create(name: crewNames[i], maxHrOverride: 195);
           await sensors.assign(sensorId: 'S$i', athleteId: a.id, sensorName: 'Polar H10 $i');
         }
       },
+      lineups: eightLineup,
     );
     await tester.pumpWidget(testApp(bootstrap));
     await pumpFor(tester, const Duration(milliseconds: 500));
-
-    // All eight straps connected and subscribed.
     expect(adapter.subscribeCalls.toSet().length, 8);
-    expect(find.byType(AthleteCard), findsNWidgets(8));
 
-    final bpms = [172, 95, 128, 140, 155, 181, 110, 163];
+    final bpms = [176, 181, 172, 168, 184, 163, 159, 171];
     for (var i = 0; i < 8; i++) {
-      adapter.pushPacket('S$i', [0x16, bpms[i], 0x00, 0x03]); // contact ok + RR
+      adapter.pushPacket('S$i', [0x16, bpms[i], 0x00, 0x03]);
     }
     await pumpFor(tester, const Duration(milliseconds: 300));
 
-    expect(find.text('NICHOLAS'), findsOneWidget);
-    expect(find.text('172'), findsOneWidget);
-    expect(find.text('90% MAX'), findsOneWidget); // 172 / 190 = 90.5% (floored)
-    expect(find.text('ZONE 5'), findsWidgets);
-    await screenshot(tester, '03_dashboard_ipad_live');
+    // Ready check before Start.
+    expect(find.text('8+ · Lineup A'), findsOneWidget);
+    expect(find.text('8 of 8 straps live'), findsOneWidget);
+    await screenshot(tester, '03_live_ready_check');
 
-    // Nicholas' strap drops: DISCONNECTED immediately, no BPM.
-    adapter.linkDown('S0');
-    for (var i = 1; i < 8; i++) {
+    await startSession(tester);
+    for (var i = 0; i < 8; i++) {
+      adapter.pushPacket('S$i', [0x16, bpms[i], 0x00, 0x03]);
+    }
+    await pumpFor(tester, const Duration(milliseconds: 300));
+
+    // Full-screen crew view: no nav bar, seats stroke first.
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(find.text('SpeedCoach not connected'), findsOneWidget);
+    expect(find.text('HR 8/8 LIVE'), findsOneWidget);
+    expect(find.text('Marcus T.'), findsOneWidget);
+    expect(find.text('STROKE'), findsOneWidget);
+    expect(find.text('BOW'), findsOneWidget);
+    expect(find.text('176'), findsOneWidget);
+    expect(find.text('90%'), findsOneWidget); // 176 / 195
+    expect(find.text('Z5'), findsWidgets);
+    final strokeY = tester.getCenter(find.text('Marcus T.')).dy;
+    final bowY = tester.getCenter(find.text('Ryan D.')).dy;
+    expect(strokeY, lessThan(bowY));
+    await screenshot(tester, '04_crew_live_portrait');
+
+    // Bow's strap drops: no BPM, reconnecting.
+    adapter.linkDown('S7');
+    for (var i = 0; i < 7; i++) {
       adapter.pushPacket('S$i', [0x16, bpms[i] + 1, 0x00, 0x03]);
     }
     await pumpFor(tester, const Duration(milliseconds: 300));
-    expect(find.text('172'), findsNothing);
-    expect(find.textContaining('DISCONNECTED'), findsOneWidget);
-    await screenshot(tester, '04_dashboard_ipad_one_disconnected');
+    expect(find.text('171'), findsNothing);
+    expect(find.text('RECONNECTING'), findsOneWidget);
+    expect(find.text('HR 7/8 LIVE'), findsOneWidget);
 
-    // Everyone else goes quiet for 6 s -> weak signal (greyed), 16 s -> "--".
+    // Everyone else goes quiet: weak signal (dimmed), then no signal ("--").
     await pumpFor(tester, const Duration(seconds: 6), step: const Duration(milliseconds: 500));
-    expect(find.textContaining('WEAK SIGNAL'), findsWidgets);
+    expect(find.text('WEAK SIGNAL'), findsWidgets);
+    await screenshot(tester, '05_crew_live_weak_signal');
     await pumpFor(tester, const Duration(seconds: 10), step: const Duration(milliseconds: 500));
-    expect(find.textContaining('NO SIGNAL'), findsWidgets);
-    expect(find.text('96'), findsNothing); // Ava's last value no longer shown
-    await screenshot(tester, '05_dashboard_ipad_signal_lost');
+    expect(find.text('NO SIGNAL'), findsWidgets);
+    expect(find.text('177'), findsNothing);
+
+    // Landscape: one card per seat.
+    await setSize(tester, const Size(844, 390));
+    for (var i = 0; i < 7; i++) {
+      adapter.pushPacket('S$i', [0x16, bpms[i], 0x00, 0x03]);
+    }
+    await pumpFor(tester, const Duration(milliseconds: 400));
+    expect(find.text('176'), findsOneWidget);
+    await screenshot(tester, '06_crew_live_landscape');
+    await setSize(tester, const Size(390, 844));
+    await pumpFor(tester, const Duration(milliseconds: 300));
+
+    // Swap seats mid-session: Sam K. (5) <-> Chris P. (3).
+    await tester.tap(find.text('Seats'));
+    await pumpFor(tester, const Duration(milliseconds: 500));
+    await tester.tap(find.bySemanticsLabel(RegExp(r'^Seat 5, Sam K\.$')));
+    await pumpFor(tester, const Duration(milliseconds: 200));
+    expect(find.text('Move Sam K.'), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel(RegExp(r'^Seat 3, Chris P\.$')));
+    await pumpFor(tester, const Duration(milliseconds: 200));
+    await screenshot(tester, '07_crew_swap_seats');
+    await tester.tap(find.text('Swap seats'));
+    for (var i = 0; i < 6; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await pumpFor(tester, const Duration(milliseconds: 500));
+    expect(find.text('Move Sam K.'), findsNothing);
+    final samY = tester.getCenter(find.text('Sam K.')).dy;
+    final chrisY = tester.getCenter(find.text('Chris P.')).dy;
+    expect(samY, greaterThan(chrisY)); // Sam now in seat 3, below Chris in 5
+
+    await holdToStop(tester);
+    expect(find.text('Session summary'), findsOneWidget);
+    expect(find.text('Crew heart rate by seat'), findsOneWidget);
+    expect(find.text('Seat changes and marks'), findsOneWidget);
+    await screenshot(tester, '08_session_summary_crew');
+    semantics.dispose();
 
     await disposeApp(tester, bootstrap);
   });
 
-  testWidgets('phone layout fits 12 athletes and session can be started and stopped', (
+  testWidgets('without a lineup the crew screen lists every strap, and stop needs a hold', (
     tester,
   ) async {
-    await setSize(tester, const Size(430, 932));
+    await setSize(tester, const Size(390, 844));
     final adapter = FakeBleAdapter();
     final bootstrap = await buildTestBootstrap(
       tester,
       adapter,
       seed: (athletes, sensors) async {
-        for (var i = 0; i < 12; i++) {
+        for (var i = 0; i < 6; i++) {
           final a = await athletes.create(name: 'Rower ${i + 1}', age: 18 + i);
           await sensors.assign(sensorId: 'R$i', athleteId: a.id);
         }
@@ -107,43 +206,85 @@ void main() {
     );
     await tester.pumpWidget(testApp(bootstrap));
     await pumpFor(tester, const Duration(milliseconds: 500));
-    for (var i = 0; i < 12; i++) {
-      adapter.pushHr('R$i', 120 + i * 5);
-    }
-    await pumpFor(tester, const Duration(milliseconds: 300));
-    await screenshot(tester, '06_dashboard_phone_12');
+    expect(find.textContaining('6 rowers with straps'), findsOneWidget);
 
-    await tester.tap(find.text('Start session'));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await pumpFor(tester, const Duration(milliseconds: 300));
-    expect(find.text('RECORDING'), findsOneWidget);
-
-    for (var t = 0; t < 5; t++) {
-      for (var i = 0; i < 12; i++) {
+    await startSession(tester);
+    for (var t = 0; t < 3; t++) {
+      for (var i = 0; i < 6; i++) {
         adapter.pushHr('R$i', 130 + i * 4 + t);
       }
       await pumpFor(tester, const Duration(seconds: 1), step: const Duration(milliseconds: 250));
     }
-    await screenshot(tester, '07_dashboard_phone_recording');
+    expect(find.text('HEART RATE · BPM'), findsOneWidget);
+    expect(find.text('Rower 1'), findsOneWidget);
+    expect(find.textContaining('REC 0:0'), findsOneWidget);
 
-    await tester.tap(find.text('Stop'));
-    await pumpFor(tester, const Duration(milliseconds: 300));
-    await tester.tap(find.text('Stop session'));
-    for (var i = 0; i < 10; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-      await tester.pump(const Duration(milliseconds: 100));
-    }
-    await pumpFor(tester, const Duration(seconds: 1));
+    // A quick tap does not stop the session.
+    await tester.tap(find.text('Hold to stop'));
+    await pumpFor(tester, const Duration(milliseconds: 500));
+    expect(find.text('Hold for 1 second to stop'), findsOneWidget);
+    expect(find.text('Session summary'), findsNothing);
+    await pumpFor(tester, const Duration(seconds: 2)); // hint snackbar goes away
+
+    await holdToStop(tester);
     expect(find.text('Session summary'), findsOneWidget);
     expect(find.text('Rower 1'), findsOneWidget);
     expect(find.text('AVG'), findsWidgets);
-    await screenshot(tester, '08_session_summary_phone');
+
+    await disposeApp(tester, bootstrap);
+  });
+
+  testWidgets('lineup tab: create a lineup, seat rowers from the bench and save', (tester) async {
+    await setSize(tester, const Size(390, 844));
+    final adapter = FakeBleAdapter();
+    final bootstrap = await buildTestBootstrap(
+      tester,
+      adapter,
+      seed: (athletes, sensors) async {
+        for (final n in ['Ava', 'Ben', 'Chloe', 'Dan', 'Eve']) {
+          await athletes.create(name: n);
+        }
+      },
+    );
+    await tester.pumpWidget(testApp(bootstrap));
+    await pumpFor(tester, const Duration(milliseconds: 300));
+
+    await tester.tap(find.text('Lineup'));
+    await pumpFor(tester, const Duration(milliseconds: 300));
+    await tester.tap(find.text('Create lineup'));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await pumpFor(tester, const Duration(milliseconds: 300));
+
+    await tester.tap(find.text('4+'));
+    await pumpFor(tester, const Duration(milliseconds: 200));
+    for (final n in ['Ava', 'Ben', 'Chloe', 'Dan']) {
+      await tester.scrollUntilVisible(find.widgetWithText(ActionChip, n), 200);
+      await tester.tap(find.widgetWithText(ActionChip, n));
+      await pumpFor(tester, const Duration(milliseconds: 150));
+    }
+    await tester.scrollUntilVisible(find.widgetWithText(ActionChip, 'Eve'), 200);
+    await tester.tap(find.widgetWithText(ActionChip, 'Eve')); // fills the cox seat
+    await pumpFor(tester, const Duration(milliseconds: 200));
+    expect(find.text('Save lineup'), findsOneWidget);
+    expect(find.text('Everyone is in the boat.'), findsOneWidget);
+
+    await tester.tap(find.text('Save lineup'));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await pumpFor(tester, const Duration(milliseconds: 300));
+    expect(find.text('Saved'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Ava'), -200);
+    await screenshot(tester, '09_lineup_phone');
+
+    await tester.tap(find.text('Live'));
+    await pumpFor(tester, const Duration(milliseconds: 300));
+    expect(find.text('4+ · Lineup A'), findsOneWidget);
+    expect(find.text('0 of 4 straps live'), findsOneWidget);
 
     await disposeApp(tester, bootstrap);
   });
 
   testWidgets('sensors screen scans, lists HR straps and assigns an athlete', (tester) async {
-    await setSize(tester, const Size(430, 932));
+    await setSize(tester, const Size(390, 844));
     final adapter = FakeBleAdapter();
     final bootstrap = await buildTestBootstrap(
       tester,
@@ -166,11 +307,10 @@ void main() {
     await pumpFor(tester, const Duration(milliseconds: 300));
     expect(find.text('Polar H10 ABC123'), findsOneWidget);
     expect(find.text('TICKR 8F21'), findsOneWidget);
-    await screenshot(tester, '09_sensors_scan_phone');
+    await screenshot(tester, '10_sensors_scan_phone');
 
     await tester.tap(find.text('Polar H10 ABC123'));
     await pumpFor(tester, const Duration(milliseconds: 500));
-    await screenshot(tester, '10_sensor_sheet_phone');
     await tester.tap(find.text('Assign athlete'));
     await pumpFor(tester, const Duration(milliseconds: 500));
     await tester.tap(find.text('Nicholas').last);
@@ -183,7 +323,6 @@ void main() {
     expect(adapter.connectCalls, contains('H10-ABC123'));
     expect(find.text('Nicholas'), findsWidgets);
     expect(find.text('ASSIGNED (1)'), findsOneWidget);
-    await screenshot(tester, '11_sensors_assigned_phone');
 
     await disposeApp(tester, bootstrap);
   });

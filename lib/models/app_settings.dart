@@ -12,17 +12,40 @@ enum KeepAwakeMode {
   final String label;
 }
 
-enum DashboardDensity {
-  /// Fit every athlete on screen when possible (coach tablet mode).
-  auto('Auto-fit'),
+/// Colour scheme of the live (on-the-water) screens.
+enum LiveTheme {
+  /// Near-black background, white and amber numerals. Default.
+  water('On the water'),
 
-  /// Big cards, scroll when needed.
-  large('Large'),
+  /// White background, for direct sun.
+  daylight('Daylight');
 
-  /// Smaller cards, more per screen.
-  compact('Compact');
+  const LiveTheme(this.label);
+  final String label;
+}
 
-  const DashboardDensity(this.label);
+/// Which view the live screen opens in while recording.
+enum LiveViewMode {
+  /// SpeedCoach heroes plus one row per seat with heart rate.
+  crew('Crew'),
+
+  /// Every SpeedCoach value, trends and 500 m splits.
+  boat('Boat data'),
+
+  /// Split, rate, distance and elapsed only.
+  simple('Simple');
+
+  const LiveViewMode(this.label);
+  final String label;
+}
+
+/// Optional goal for a piece.
+enum TargetKind {
+  none('None'),
+  distance('Distance'),
+  time('Time');
+
+  const TargetKind(this.label);
   final String label;
 }
 
@@ -36,13 +59,18 @@ class AppSettings {
     this.staleAfter = const Duration(seconds: 5),
     this.signalLostAfter = const Duration(seconds: 15),
     this.keepAwake = KeepAwakeMode.duringSession,
-    this.density = DashboardDensity.auto,
     this.themeMode = ThemeMode.system,
     this.showTimeInZone = true,
     this.verboseLogging = false,
     this.bluetoothIntroSeen = false,
     this.speedCoachSerial,
     this.speedCoachBoatName = 'PulseBoard',
+    this.liveTheme = LiveTheme.water,
+    this.liveViewMode = LiveViewMode.crew,
+    this.targetSplit,
+    this.targetKind = TargetKind.none,
+    this.targetDistanceMeters = 2000,
+    this.targetTime = const Duration(minutes: 20),
   });
 
   final ZoneModel zoneModel;
@@ -55,7 +83,6 @@ class AppSettings {
   /// After this long without a reading, "--" is shown instead of a BPM.
   final Duration signalLostAfter;
   final KeepAwakeMode keepAwake;
-  final DashboardDensity density;
   final ThemeMode themeMode;
   final bool showTimeInZone;
 
@@ -73,6 +100,16 @@ class AppSettings {
   /// Boat name the SpeedCoach reads from the receiver.
   final String speedCoachBoatName;
 
+  final LiveTheme liveTheme;
+  final LiveViewMode liveViewMode;
+
+  /// Target time per 500 m. When set, the live views show ahead / on /
+  /// behind.
+  final Duration? targetSplit;
+  final TargetKind targetKind;
+  final int targetDistanceMeters;
+  final Duration targetTime;
+
   static const List<int> staleChoicesSeconds = [3, 5, 8, 10, 15];
   static const List<int> lostChoicesSeconds = [10, 15, 20, 30, 60];
 
@@ -83,13 +120,18 @@ class AppSettings {
     Duration? staleAfter,
     Duration? signalLostAfter,
     KeepAwakeMode? keepAwake,
-    DashboardDensity? density,
     ThemeMode? themeMode,
     bool? showTimeInZone,
     bool? verboseLogging,
     bool? bluetoothIntroSeen,
     String? Function()? speedCoachSerial,
     String? speedCoachBoatName,
+    LiveTheme? liveTheme,
+    LiveViewMode? liveViewMode,
+    Duration? Function()? targetSplit,
+    TargetKind? targetKind,
+    int? targetDistanceMeters,
+    Duration? targetTime,
   }) {
     return AppSettings(
       zoneModel: zoneModel ?? this.zoneModel,
@@ -98,19 +140,26 @@ class AppSettings {
       staleAfter: staleAfter ?? this.staleAfter,
       signalLostAfter: signalLostAfter ?? this.signalLostAfter,
       keepAwake: keepAwake ?? this.keepAwake,
-      density: density ?? this.density,
       themeMode: themeMode ?? this.themeMode,
       showTimeInZone: showTimeInZone ?? this.showTimeInZone,
       verboseLogging: verboseLogging ?? this.verboseLogging,
       bluetoothIntroSeen: bluetoothIntroSeen ?? this.bluetoothIntroSeen,
       speedCoachSerial: speedCoachSerial != null ? speedCoachSerial() : this.speedCoachSerial,
       speedCoachBoatName: speedCoachBoatName ?? this.speedCoachBoatName,
+      liveTheme: liveTheme ?? this.liveTheme,
+      liveViewMode: liveViewMode ?? this.liveViewMode,
+      targetSplit: targetSplit != null ? targetSplit() : this.targetSplit,
+      targetKind: targetKind ?? this.targetKind,
+      targetDistanceMeters: targetDistanceMeters ?? this.targetDistanceMeters,
+      targetTime: targetTime ?? this.targetTime,
     );
   }
 
   /// The signal-lost timeout is always strictly longer than the stale one.
   Duration get effectiveSignalLostAfter =>
       signalLostAfter > staleAfter ? signalLostAfter : staleAfter + const Duration(seconds: 5);
+
+  bool get hasTargets => targetSplit != null || targetKind != TargetKind.none;
 
   Map<String, Object?> toJson() => {
     'zoneLowerBounds': zoneModel.lowerBoundsPercent,
@@ -119,13 +168,18 @@ class AppSettings {
     'staleAfterMs': staleAfter.inMilliseconds,
     'signalLostAfterMs': signalLostAfter.inMilliseconds,
     'keepAwake': keepAwake.name,
-    'density': density.name,
     'themeMode': themeMode.name,
     'showTimeInZone': showTimeInZone,
     'verboseLogging': verboseLogging,
     'bluetoothIntroSeen': bluetoothIntroSeen,
     'speedCoachSerial': speedCoachSerial,
     'speedCoachBoatName': speedCoachBoatName,
+    'liveTheme': liveTheme.name,
+    'liveViewMode': liveViewMode.name,
+    'targetSplitMs': targetSplit?.inMilliseconds,
+    'targetKind': targetKind.name,
+    'targetDistanceM': targetDistanceMeters,
+    'targetTimeMs': targetTime.inMilliseconds,
   };
 
   /// Tolerant decoding: unknown or invalid values fall back to defaults so a
@@ -143,6 +197,8 @@ class AppSettings {
     Duration durationOr(Object? ms, Duration fallback) =>
         ms is int && ms > 0 ? Duration(milliseconds: ms) : fallback;
 
+    bool boolOr(Object? v, bool fallback) => v is bool ? v : fallback;
+
     var zones = d.zoneModel;
     final rawBounds = json['zoneLowerBounds'];
     if (rawBounds is List) {
@@ -152,26 +208,19 @@ class AppSettings {
       }
     }
 
+    final split = json['targetSplitMs'];
+    final distance = json['targetDistanceM'];
     return AppSettings(
       zoneModel: zones,
       maxHrFormula: enumOr(MaxHrFormula.values, json['maxHrFormula'], d.maxHrFormula),
-      autoReconnect: json['autoReconnect'] is bool
-          ? json['autoReconnect']! as bool
-          : d.autoReconnect,
+      autoReconnect: boolOr(json['autoReconnect'], d.autoReconnect),
       staleAfter: durationOr(json['staleAfterMs'], d.staleAfter),
       signalLostAfter: durationOr(json['signalLostAfterMs'], d.signalLostAfter),
       keepAwake: enumOr(KeepAwakeMode.values, json['keepAwake'], d.keepAwake),
-      density: enumOr(DashboardDensity.values, json['density'], d.density),
       themeMode: enumOr(ThemeMode.values, json['themeMode'], d.themeMode),
-      showTimeInZone: json['showTimeInZone'] is bool
-          ? json['showTimeInZone']! as bool
-          : d.showTimeInZone,
-      verboseLogging: json['verboseLogging'] is bool
-          ? json['verboseLogging']! as bool
-          : d.verboseLogging,
-      bluetoothIntroSeen: json['bluetoothIntroSeen'] is bool
-          ? json['bluetoothIntroSeen']! as bool
-          : d.bluetoothIntroSeen,
+      showTimeInZone: boolOr(json['showTimeInZone'], d.showTimeInZone),
+      verboseLogging: boolOr(json['verboseLogging'], d.verboseLogging),
+      bluetoothIntroSeen: boolOr(json['bluetoothIntroSeen'], d.bluetoothIntroSeen),
       speedCoachSerial:
           json['speedCoachSerial'] is String && (json['speedCoachSerial']! as String).isNotEmpty
           ? json['speedCoachSerial']! as String
@@ -181,6 +230,12 @@ class AppSettings {
               (json['speedCoachBoatName']! as String).trim().isNotEmpty
           ? json['speedCoachBoatName']! as String
           : d.speedCoachBoatName,
+      liveTheme: enumOr(LiveTheme.values, json['liveTheme'], d.liveTheme),
+      liveViewMode: enumOr(LiveViewMode.values, json['liveViewMode'], d.liveViewMode),
+      targetSplit: split is int && split > 0 ? Duration(milliseconds: split) : null,
+      targetKind: enumOr(TargetKind.values, json['targetKind'], d.targetKind),
+      targetDistanceMeters: distance is int && distance > 0 ? distance : d.targetDistanceMeters,
+      targetTime: durationOr(json['targetTimeMs'], d.targetTime),
     );
   }
 
@@ -193,13 +248,18 @@ class AppSettings {
       other.staleAfter == staleAfter &&
       other.signalLostAfter == signalLostAfter &&
       other.keepAwake == keepAwake &&
-      other.density == density &&
       other.themeMode == themeMode &&
       other.showTimeInZone == showTimeInZone &&
       other.verboseLogging == verboseLogging &&
       other.bluetoothIntroSeen == bluetoothIntroSeen &&
       other.speedCoachSerial == speedCoachSerial &&
-      other.speedCoachBoatName == speedCoachBoatName;
+      other.speedCoachBoatName == speedCoachBoatName &&
+      other.liveTheme == liveTheme &&
+      other.liveViewMode == liveViewMode &&
+      other.targetSplit == targetSplit &&
+      other.targetKind == targetKind &&
+      other.targetDistanceMeters == targetDistanceMeters &&
+      other.targetTime == targetTime;
 
   @override
   int get hashCode => Object.hash(
@@ -209,12 +269,17 @@ class AppSettings {
     staleAfter,
     signalLostAfter,
     keepAwake,
-    density,
     themeMode,
     showTimeInZone,
     verboseLogging,
     bluetoothIntroSeen,
     speedCoachSerial,
     speedCoachBoatName,
+    liveTheme,
+    liveViewMode,
+    targetSplit,
+    targetKind,
+    targetDistanceMeters,
+    targetTime,
   );
 }

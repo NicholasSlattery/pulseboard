@@ -5,11 +5,13 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../app/theme.dart';
+import '../../models/session_extras.dart';
 import '../../providers/core_providers.dart';
 import '../../providers/session_provider.dart';
 import '../../session/csv_exporter.dart';
 import '../../session/session_stats.dart';
 import '../../utils/formatters.dart';
+import '../../utils/rowing_format.dart';
 import '../../widgets/common.dart';
 import '../../widgets/hr_chart.dart';
 
@@ -103,6 +105,14 @@ class _SessionSummaryScreenState extends ConsumerState<SessionSummaryScreen> {
             );
           }
           final session = s.session;
+          final extras = s.extras;
+          // Seat order when the crew was set, else by name.
+          final stats = [...s.stats]
+            ..sort((a, b) {
+              final sa = extras.seatOf(a.athleteId) ?? -1;
+              final sb = extras.seatOf(b.athleteId) ?? -1;
+              return sb.compareTo(sa);
+            });
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -110,19 +120,33 @@ class _SessionSummaryScreenState extends ConsumerState<SessionSummaryScreen> {
               const SizedBox(height: 4),
               Text(
                 [
+                  if (extras.lineupName != null)
+                    '${extras.boatClass == null ? '' : '${extras.boatClass} · '}${extras.lineupName}',
                   'Duration ${Fmt.duration(session.duration())}',
                   '${s.athletes.length} athlete${s.athletes.length == 1 ? '' : 's'}',
                   if (session.recovered) 'recovered after the app closed unexpectedly',
                 ].join(' · '),
               ),
               const SizedBox(height: 16),
-              if (s.stats.isEmpty)
+              if (extras.boat != null) ...[
+                CrewBoatSummary(boat: extras.boat!),
+                const SizedBox(height: 12),
+              ],
+              if (extras.seats.isNotEmpty && s.stats.isNotEmpty) ...[
+                CrewHrTable(summary: s),
+                const SizedBox(height: 12),
+              ],
+              if (extras.seatChanges.isNotEmpty || extras.marks.isNotEmpty) ...[
+                _CrewLog(extras: extras),
+                const SizedBox(height: 12),
+              ],
+              if (s.stats.isEmpty && extras.boat == null)
                 const EmptyState(
                   icon: Icons.person_off_outlined,
                   title: 'No athletes in this session',
                   message: '',
                 ),
-              for (final stats in s.stats) ...[
+              for (final stats in stats) ...[
                 _AthleteSummaryCard(
                   stats: stats,
                   maxHr: s.athletes.firstWhere((a) => a.athleteId == stats.athleteId).maxHr,
@@ -134,6 +158,313 @@ class _SessionSummaryScreenState extends ConsumerState<SessionSummaryScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// Boat numbers of the last SpeedCoach piece.
+class CrewBoatSummary extends StatelessWidget {
+  const CrewBoatSummary({super.key, required this.boat});
+
+  final BoatSummary boat;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final best = boat.splits500.isEmpty ? null : boat.splits500.reduce((a, b) => a <= b ? a : b);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.rowing, size: 20),
+                const SizedBox(width: 8),
+                Expanded(child: Text('Boat', style: theme.textTheme.titleLarge)),
+                if (boat.serial != null)
+                  Text('SC ${boat.serial}', style: theme.textTheme.bodySmall),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 24,
+              runSpacing: 12,
+              children: [
+                _Stat(label: 'DISTANCE', value: RowFmt.distance(boat.distanceMeters), unit: 'm'),
+                _Stat(label: 'TIME', value: RowFmt.elapsed(boat.elapsed), unit: ''),
+                _Stat(label: 'AVG SPLIT', value: RowFmt.split(boat.averageSplit), unit: '/500m'),
+                _Stat(label: 'AVG RATE', value: RowFmt.averageRate(boat.averageRate), unit: 'spm'),
+                _Stat(
+                  label: 'DIST / STROKE',
+                  value: RowFmt.meters1(boat.distancePerStroke),
+                  unit: boat.strokes == null ? 'm' : 'm · ${boat.strokes} strokes',
+                ),
+                if (best != null) _Stat(label: 'BEST 500', value: RowFmt.split(best), unit: ''),
+              ],
+            ),
+            if (boat.splits500.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text('500 m splits', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 4),
+              for (var i = 0; i < boat.splits500.length; i++)
+                _SplitBar(
+                  mark: RowFmt.thousands((i + 1) * 500),
+                  split: boat.splits500[i],
+                  best: best!,
+                  worst: boat.splits500.reduce((a, b) => a >= b ? a : b),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SplitBar extends StatelessWidget {
+  const _SplitBar({
+    required this.mark,
+    required this.split,
+    required this.best,
+    required this.worst,
+  });
+
+  final String mark;
+  final Duration split;
+  final Duration best;
+  final Duration worst;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isBest = split == best;
+    // Bar = speed: the fastest 500 is the longest bar.
+    final range = (worst - best).inMilliseconds;
+    final f = range == 0 ? 1.0 : 0.6 + 0.4 * (worst - split).inMilliseconds / range;
+    final color = isBest ? theme.colorScheme.primary : theme.colorScheme.outline;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(width: 52, child: Text(mark, style: theme.textTheme.bodyMedium)),
+          SizedBox(
+            width: 72,
+            child: Text(
+              RowFmt.split(split),
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: isBest ? theme.colorScheme.primary : null,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(5),
+              child: LinearProgressIndicator(
+                value: f,
+                minHeight: 10,
+                color: color,
+                backgroundColor: theme.colorScheme.surfaceContainerHighest,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 44,
+            child: Text(
+              isBest ? 'BEST' : '',
+              textAlign: TextAlign.right,
+              style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.primary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Heart rate by seat: average, max and time in zones per rower.
+class CrewHrTable extends StatelessWidget {
+  const CrewHrTable({super.key, required this.summary});
+
+  final SessionSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final extras = summary.extras;
+    final byId = {for (final st in summary.stats) st.athleteId: st};
+    final rows = [...extras.seats]..sort((a, b) => b.seat.compareTo(a.seat));
+    TextStyle? head() => theme.textTheme.labelSmall?.copyWith(letterSpacing: 1);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Crew heart rate by seat', style: theme.textTheme.titleLarge),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                SizedBox(width: 34, child: Text('SEAT', style: head(), softWrap: false)),
+                const SizedBox(width: 8),
+                Expanded(child: Text('ROWER', style: head())),
+                SizedBox(
+                  width: 40,
+                  child: Text('AVG', style: head(), textAlign: TextAlign.right),
+                ),
+                SizedBox(
+                  width: 40,
+                  child: Text('MAX', style: head(), textAlign: TextAlign.right),
+                ),
+                const SizedBox(width: 10),
+                SizedBox(width: 96, child: Text('TIME IN ZONE', style: head())),
+              ],
+            ),
+            for (final seat in rows) ...[
+              const Divider(height: 12),
+              _CrewHrRow(seat: seat.seat, name: seat.name, stats: byId[seat.athleteId]),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CrewHrRow extends StatelessWidget {
+  const _CrewHrRow({required this.seat, required this.name, required this.stats});
+
+  final int seat;
+  final String name;
+  final AthleteSessionStats? stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final st = stats;
+    const tabular = [FontFeature.tabularFigures()];
+    return SizedBox(
+      height: 36,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 34,
+            child: Text(
+              '$seat',
+              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall,
+            ),
+          ),
+          SizedBox(
+            width: 40,
+            child: Text(
+              st == null || !st.hasData ? '--' : '${st.averageHr}',
+              textAlign: TextAlign.right,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                fontFeatures: tabular,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 40,
+            child: Text(
+              st == null || !st.hasData ? '--' : '${st.maxHr}',
+              textAlign: TextAlign.right,
+              style: theme.textTheme.bodyMedium?.copyWith(fontFeatures: tabular),
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 96,
+            height: 12,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: st == null || !st.hasData
+                  ? ColoredBox(color: theme.colorScheme.surfaceContainerHighest)
+                  : Row(
+                      children: [
+                        for (var z = 0; z < st.timeInZone.length; z++)
+                          if (st.fractionInZone(z) > 0)
+                            Expanded(
+                              flex: (st.fractionInZone(z) * 1000).round().clamp(1, 1000),
+                              child: ColoredBox(color: AppColors.zone(z)),
+                            ),
+                      ],
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Seat changes and marks made during the session.
+class _CrewLog extends StatelessWidget {
+  const _CrewLog({required this.extras});
+
+  final SessionExtras extras;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final entries = <(DateTime, String)>[
+      for (final c in extras.seatChanges)
+        (
+          c.time,
+          'Seat ${c.seat}: ${c.toName ?? 'empty'}'
+              '${c.fromName == null ? '' : ' (was ${c.fromName})'}'
+              '${c.distanceMeters == null ? '' : ' at ${RowFmt.distance(c.distanceMeters)} m'}',
+        ),
+      for (final m in extras.marks)
+        (
+          m.time,
+          'Mark${m.distanceMeters == null ? '' : ' at ${RowFmt.distance(m.distanceMeters)} m'}'
+              '${m.elapsed == null ? '' : ' · ${RowFmt.elapsed(m.elapsed)}'}',
+        ),
+    ]..sort((a, b) => a.$1.compareTo(b.$1));
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Seat changes and marks', style: theme.textTheme.titleLarge),
+            const SizedBox(height: 8),
+            for (final (t, text) in entries)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 64,
+                      child: Text(
+                        '${Fmt.time(t)}:${t.second.toString().padLeft(2, '0')}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                    Expanded(child: Text(text, style: theme.textTheme.bodyMedium)),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

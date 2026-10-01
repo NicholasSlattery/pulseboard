@@ -18,7 +18,7 @@ class AppDatabase {
 
   final Database db;
 
-  static const int schemaVersion = 1;
+  static const int schemaVersion = 2;
 
   /// Opens (creating if needed) the on-device database file in the app's
   /// private Application Support directory.
@@ -123,13 +123,26 @@ class AppDatabase {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       )''');
+    _createSessionExtras(batch);
     await batch.commit(noResult: true);
     _log.info('Schema v$schemaVersion created');
   }
 
+  /// v2: crew and boat data per session (lineup snapshot, seat changes,
+  /// marks, SpeedCoach summary) as one JSON blob.
+  static void _createSessionExtras(Batch batch) {
+    batch.execute('''
+      CREATE TABLE session_extras (
+        session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+        data TEXT NOT NULL
+      )''');
+  }
+
   static Future<void> _migrate(Database db, int from, int to) async {
-    // Add `if (from < 2) { ... }` blocks here as the schema evolves.
     _log.info('Migrating schema $from -> $to');
+    final batch = db.batch();
+    if (from < 2) _createSessionExtras(batch);
+    await batch.commit(noResult: true);
   }
 
   Future<void> close() => db.close();

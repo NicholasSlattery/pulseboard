@@ -9,10 +9,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:pulseboard/app/app.dart';
 import 'package:pulseboard/models/app_settings.dart';
+import 'package:pulseboard/models/athlete.dart';
+import 'package:pulseboard/models/lineup.dart';
 import 'package:pulseboard/providers/core_providers.dart';
 import 'package:pulseboard/speedcoach/peripheral_adapter.dart';
 import 'package:pulseboard/storage/app_database.dart';
 import 'package:pulseboard/storage/athlete_repository.dart';
+import 'package:pulseboard/storage/lineup_repository.dart';
 import 'package:pulseboard/storage/sensor_repository.dart';
 import 'package:pulseboard/storage/settings_repository.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -26,6 +29,7 @@ Future<AppBootstrap> buildTestBootstrap(
   FakeBleAdapter adapter, {
   AppSettings settings = const AppSettings(bluetoothIntroSeen: true),
   Future<void> Function(AthleteRepository athletes, SensorRepository sensors)? seed,
+  LineupBook Function(List<Athlete> athletes)? lineups,
   PeripheralAdapter? peripheral,
 }) async {
   late AppBootstrap bootstrap;
@@ -35,12 +39,16 @@ Future<AppBootstrap> buildTestBootstrap(
     final sensors = SensorRepository(db);
     await SettingsRepository(db).save(settings);
     if (seed != null) await seed(athletes, sensors);
+    final all = await athletes.getAll();
+    final book = lineups == null ? LineupBook.empty : lineups(all);
+    await LineupRepository(db).save(book);
     bootstrap = AppBootstrap(
       database: db,
       adapter: adapter,
       settings: settings,
-      athletes: await athletes.getAll(),
+      athletes: all,
       sensors: await sensors.getAll(),
+      lineups: book,
       peripheralAdapter: peripheral,
     );
   });
@@ -82,11 +90,13 @@ Future<void> disposeApp(WidgetTester tester, AppBootstrap bootstrap) async {
 const _screenshotDir = String.fromEnvironment('SCREENSHOT_DIR');
 bool _fontsLoaded = false;
 
+/// Loads real Roboto + Material Icons for every widget test (not just
+/// screenshot runs), so layouts are tested with real glyph widths instead
+/// of the square test font.
 Future<void> loadRealFonts() async {
-  if (_screenshotDir.isEmpty || _fontsLoaded) return;
-  final root = Platform.environment['FLUTTER_ROOT'];
-  if (root == null) return;
-  final dir = p.join(root, 'bin', 'cache', 'artifacts', 'material_fonts');
+  if (_fontsLoaded) return;
+  final dir = _materialFontsDir();
+  if (dir == null) return;
   Future<void> load(String family, List<String> files) async {
     final loader = FontLoader(family);
     for (final f in files) {
@@ -104,6 +114,21 @@ Future<void> loadRealFonts() async {
   ]);
   await load('MaterialIcons', ['materialicons-regular.otf']);
   _fontsLoaded = true;
+}
+
+/// `<flutter>/bin/cache/artifacts/material_fonts`, from FLUTTER_ROOT or by
+/// walking up from the flutter_tester executable.
+String? _materialFontsDir() {
+  String fontsIn(String root) => p.join(root, 'bin', 'cache', 'artifacts', 'material_fonts');
+  final env = Platform.environment['FLUTTER_ROOT'];
+  if (env != null && Directory(fontsIn(env)).existsSync()) return fontsIn(env);
+  var dir = File(Platform.resolvedExecutable).parent;
+  for (var i = 0; i < 8; i++) {
+    final candidate = p.join(dir.path, 'material_fonts');
+    if (Directory(candidate).existsSync()) return candidate;
+    dir = dir.parent;
+  }
+  return null;
 }
 
 Future<void> screenshot(WidgetTester tester, String name) async {

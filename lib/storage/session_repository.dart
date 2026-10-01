@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:logging/logging.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 
+import '../models/session_extras.dart';
 import '../models/training_session.dart';
 import 'app_database.dart';
 
@@ -156,6 +158,30 @@ class SessionRepository {
       orderBy: 't ASC, id ASC',
     );
     return rows.map(SessionConnectionEvent.fromRow).toList(growable: false);
+  }
+
+  /// Crew and boat data recorded with a session (empty if none).
+  Future<SessionExtras> getExtras(String sessionId) async {
+    final rows = await _db.query(
+      'session_extras',
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return const SessionExtras();
+    try {
+      return SessionExtras.fromJson(jsonDecode(rows.first['data']! as String));
+    } on FormatException catch (e) {
+      _log.warning('Corrupt session extras for $sessionId: $e');
+      return const SessionExtras();
+    }
+  }
+
+  Future<void> saveExtras(String sessionId, SessionExtras extras) async {
+    await _db.insert('session_extras', {
+      'session_id': sessionId,
+      'data': jsonEncode(extras.toJson()),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> deleteSession(String sessionId) async {

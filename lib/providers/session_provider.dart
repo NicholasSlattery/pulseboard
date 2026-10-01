@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/hr_zones.dart';
+import '../models/session_extras.dart';
 import '../models/training_session.dart';
 import '../session/session_recorder.dart';
 import '../session/session_stats.dart';
@@ -53,11 +54,19 @@ final rosterProvider = Provider<List<RosterEntry>>((ref) {
 
 /// Everything the session summary screen shows.
 class SessionSummary {
-  const SessionSummary({required this.session, required this.athletes, required this.stats});
+  const SessionSummary({
+    required this.session,
+    required this.athletes,
+    required this.stats,
+    this.extras = const SessionExtras(),
+  });
 
   final TrainingSession session;
   final List<SessionAthlete> athletes;
   final List<AthleteSessionStats> stats;
+
+  /// Lineup and SpeedCoach data recorded with the session.
+  final SessionExtras extras;
 
   int get zoneCount => session.zoneLowerBounds.isEmpty
       ? ZoneModel.standard.zoneCount
@@ -92,7 +101,8 @@ final sessionSummaryProvider = FutureProvider.autoDispose.family<SessionSummary?
         zoneCount: zoneCount,
       ),
   ];
-  return SessionSummary(session: session, athletes: athletes, stats: stats);
+  final extras = await repo.getExtras(sessionId);
+  return SessionSummary(session: session, athletes: athletes, stats: stats, extras: extras);
 });
 
 /// Session history, refreshed whenever sessions change.

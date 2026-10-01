@@ -6,10 +6,12 @@ import '../bluetooth/heart_rate_sensor_connection.dart';
 import '../models/app_settings.dart';
 import '../models/athlete.dart';
 import '../models/known_sensor.dart';
+import '../models/lineup.dart';
 import '../session/session_recorder.dart';
 import '../speedcoach/peripheral_adapter.dart';
 import '../storage/app_database.dart';
 import '../storage/athlete_repository.dart';
+import '../storage/lineup_repository.dart';
 import '../storage/sensor_repository.dart';
 import '../storage/session_repository.dart';
 import '../storage/settings_repository.dart';
@@ -23,6 +25,7 @@ class AppBootstrap {
     required this.settings,
     required this.athletes,
     required this.sensors,
+    this.lineups = LineupBook.empty,
     this.recoveredSessions = 0,
     this.isSimulated = false,
     this.peripheralAdapter,
@@ -33,6 +36,7 @@ class AppBootstrap {
   final AppSettings settings;
   final List<Athlete> athletes;
   final List<KnownSensor> sensors;
+  final LineupBook lineups;
 
   /// Sessions that were left open by a crash and closed on this launch.
   final int recoveredSessions;
@@ -69,6 +73,10 @@ final sessionRepositoryProvider = Provider<SessionRepository>((ref) {
 
 final settingsRepositoryProvider = Provider<SettingsRepository>(
   (ref) => SettingsRepository(ref.watch(databaseProvider)),
+);
+
+final lineupRepositoryProvider = Provider<LineupRepository>(
+  (ref) => LineupRepository(ref.watch(databaseProvider)),
 );
 
 /// The single Bluetooth manager. Initial settings come from the bootstrap;

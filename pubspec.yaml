@@ -5,7 +5,7 @@ publish_to: 'none'
 # Bump the build number (+N) for every IPA you plan to install so iOS treats it
 # as an update. The display name lives in lib/app/app_info.dart and
 # ios/Runner/Info.plist (CFBundleDisplayName).
-version: 1.1.0+1
+version: 1.2.0+1
 
 environment:
   sdk: ^3.9.0

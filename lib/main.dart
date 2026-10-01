@@ -13,6 +13,7 @@ import 'bluetooth/universal_ble_adapter.dart';
 import 'providers/core_providers.dart';
 import 'storage/app_database.dart';
 import 'storage/athlete_repository.dart';
+import 'storage/lineup_repository.dart';
 import 'storage/sensor_repository.dart';
 import 'storage/session_repository.dart';
 import 'storage/settings_repository.dart';
@@ -57,6 +58,7 @@ class _BootstrapState extends State<_Bootstrap> {
     final settings = await SettingsRepository(database).load();
     final athletes = await AthleteRepository(database).getAll();
     final sensors = await SensorRepository(database).getAll();
+    final lineups = await LineupRepository(database).load();
     final BleAdapter adapter = AppInfo.useSimulator ? SimulatedBleAdapter() : UniversalBleAdapter();
     AppLogger.setVerbose(settings.verboseLogging);
     return AppBootstrap(
@@ -65,6 +67,7 @@ class _BootstrapState extends State<_Bootstrap> {
       settings: settings,
       athletes: athletes,
       sensors: sensors,
+      lineups: lineups,
       recoveredSessions: recovered,
       isSimulated: AppInfo.useSimulator,
     );
